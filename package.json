@@ -1,0 +1,15 @@
+{
+  "name": "gpt",
+  "version": "1.0.0",
+  "description": "Simple interface for custom language model visualization",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \\\"Error: no test specified\\\" && exit 1",
+    "start": "node app"
+  },
+  "author": "Caio Nogueira",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}
