@@ -1,36 +1,126 @@
 import torch
+import torch.nn.functional as F
+from torchtext import datasets
 from torchtext.data import get_tokenizer
+import torch.nn as nn
+import logging
+from tqdm import tqdm
 from model import LanguageModel
 
 
-with open('wikitext-2/wiki.train.tokens', 'r', encoding='utf-8') as f:
+tokenizer = get_tokenizer("basic_english")
+data_path = "/home/caio/gpt/data/wikitext-2/wiki.train.tokens"
+
+with open(data_path, 'r', encoding='utf-8') as f:
     text = f.read()
 
-tokenizer = get_tokenizer("basic_english")
-tokens = tokenizer(text)
+text = text.replace("\n", "<eos>")
 
+tokens = tokenizer(text)
 distinct_tokens = sorted(list(set(tokens)))
 
 token_to_idx = {token: idx for (idx, token) in enumerate(distinct_tokens)}
 idx_to_token = {idx: token for (idx, token) in enumerate(distinct_tokens)}
 
+N = int(0.9*len(tokens))
+train_data = torch.as_tensor([token_to_idx[x] for x in tokens[:N]])
+val_data = torch.as_tensor([token_to_idx[x] for x in tokens[N:]])
 
-# Hyperparameters
-n_embed = 128
+# HYPERPARAMETERS
+n_embed = 512
 n_head = 16
-n_blocks = 4
-batch_size = 16
+n_blocks = 8
+batch_size = 32
+ffdim = 2048
 lr = 1e-3
-context_len = 32
+eval_iters = 100
+eval_interval = 500
+max_iters = 5000
+context_len = 64
 vocab_size = len(token_to_idx.keys())
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-# Train
-model = LanguageModel(vocab_size, n_embed=n_embed, n_head=n_head, context_len=context_len, device=device)
+def setup_logger(log_file):
+    # Configure the logger
+    logger = logging.getLogger('training_logger')
+    logger.setLevel(logging.INFO)
+
+    # Create a file handler and set the formatter
+    file_handler = logging.FileHandler(log_file)
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    file_handler.setFormatter(formatter)
+
+    # Add the file handler to the logger
+    logger.addHandler(file_handler)
+
+    return logger
+
+def get_batch(data):
+    ix = torch.randint(len(data) - context_len, (batch_size,))
+    x = torch.stack([data[i:i+context_len] for i in ix])
+    y = torch.stack([data[i+1:i+context_len+1] for i in ix])
+    return x.to(device), y.to(device)
+
+def build_attention_mask(batch_size):
+    T=n_embed
+    tril = torch.tril(torch.ones(n_embed, n_embed))
+    attention_mask = torch.zeros((T,T))
+    attention_mask = attention_mask.masked_fill(tril == 0, float('-inf'))
+    attention_mask = F.softmax(attention_mask, dim=-1)
+
+    attention_mask = torch.stack([attention_mask for i in range(batch_size)])
+    return attention_mask.to(device)
+
+@torch.no_grad()
+def estimate_loss(model):
+    out = {}
+    model.eval()
+    for data, split in [(train_data, "train"), (val_data, "val")]:
+        losses = torch.zeros(eval_iters)
+        for k in range(eval_iters):
+            X, Y = get_batch(data)
+
+            logits = model(X, build_attention_mask(X.size(0)))
+            B,T,C = logits.shape
+            logits = logits.view(B*T, C)
+            targets = Y.view(-1) # flatten targets list
+
+            loss = F.cross_entropy(logits, targets)
+
+            losses[k] = loss.item()
+        out[split] = losses.mean()
+    model.train()
+    return out
+
+
+def train(model, log_file="training.log"):
+    model.train()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    logger = setup_logger(log_file)
+    print(f"Starting training in {device}...")
+    for iter in tqdm(range(max_iters)):
+
+        if iter % eval_interval == 0 or iter == max_iters - 1:
+            losses = estimate_loss(model)
+            logger.info(f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+
+        xb, yb = get_batch(train_data)
+
+        logits = model(xb, build_attention_mask(xb.size(0)))
+        B,T,C = logits.shape
+
+        # Merge Time dimension
+        logits = logits.view(B*T, C)
+        targets = yb.view(-1) # flatten targets list
+
+        loss = F.cross_entropy(logits, targets)
+
+        optimizer.zero_grad()
+
+        loss.backward()
+        optimizer.step()
+
+
+model = LanguageModel(vocab_size, n_embed, n_head, ffdim, n_blocks, context_len)
 model.to(device)
-
-x = torch.randn((batch_size, context_len), dtype=torch.long, device=device)
-
-out = model(x)
-
-print(out.shape)
+train(model)

@@ -5,8 +5,6 @@ from torch.nn import functional as F
 
 
 
-
-
 class LanguageModel(nn.Module):
 
     def __init__(self, vocab_size, n_embed, n_head, ffdim, n_blocks, context_len):
@@ -30,11 +28,11 @@ class LanguageModel(nn.Module):
 
     def forward(self, x, attention_mask): # x: (B, T, V)
         token_emb = self.token_embeddings(x) # (B, T, V) -> (B, T, C)
-        pos_emb = self.positional_embeddings(torch.arange(self.context_len)) # (T, C)
+        pos_emb = self.positional_embeddings(torch.arange(self.context_len, device=x.device)) # (T, C)
 
         x = token_emb + pos_emb # (B, T, C)
 
-        x = self.transformer(x, attention_mask.to(self.device))
+        x = self.transformer(x, attention_mask)
         x = self.lm_head(x)
         return x
 

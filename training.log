@@ -1,0 +1,4 @@
+2023-07-21 17:50:22,828 - INFO - step 0: train loss 10.3583, val loss 10.3605
+2023-07-21 17:54:01,065 - INFO - step 500: train loss 6.9207, val loss 7.1263
+2023-07-21 17:57:43,918 - INFO - step 1000: train loss 6.8954, val loss 7.1110
+2023-07-21 18:01:24,343 - INFO - step 1500: train loss 6.8862, val loss 7.0989
